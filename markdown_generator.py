@@ -3,6 +3,7 @@ from urllib.parse import urlparse
 from datetime import datetime
 from loguru import logger
 import hashlib
+import re
 
 class MarkdownGenerator:
     """处理将爬取的网站内容转换为Markdown文档"""
@@ -71,6 +72,7 @@ class MarkdownGenerator:
                 f.write(f'爬取时间: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n\n')
                 f.write(f'爬取深度: {depth}\n\n')
                 f.write(f'URL范围: {url_scope}\n\n')
+                
                 f.write('---\n\n')
                 
                 # 创建目录
@@ -97,6 +99,7 @@ class MarkdownGenerator:
                 # 首先处理首页内容
                 if start_url in pages:
                     title, content = pages[start_url]
+                    
                     f.write(f'## 首页\n\n')
                     f.write(f'URL: [{start_url}]({start_url})\n\n')
                     f.write(f'{content}\n\n')

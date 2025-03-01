@@ -90,7 +90,7 @@ class WebsiteCrawler:
         if len(path) > 50:
             path = path[:50]
         
-        return f'{path}_{url_hash}.json'
+        return f'{path}_{url_hash}.md'  # 修改为.md扩展名
 
     def normalize_url(self, url):
         """
@@ -138,7 +138,7 @@ class WebsiteCrawler:
     
     async def save_page(self, url, title, content):
         """
-        将页面保存到输出目录。
+        将页面保存为Markdown文件。
         
         :param url: 页面URL
         :type url: str
@@ -169,19 +169,20 @@ class WebsiteCrawler:
         filename = self.get_safe_filename(normalized_url)
         filepath = self.pages_dir / filename
         
-        # 创建页面数据结构
-        page_data = {
-            'url': url,
-            'normalized_url': normalized_url,
-            'title': title,
-            'content': content,
-            'timestamp': datetime.now().isoformat(),
-            'fingerprint': fingerprint
-        }
-        
-        # 保存为JSON文件
+        # 直接保存为Markdown文件
         with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(page_data, f, ensure_ascii=False, indent=2)
+            # 添加页面元数据作为YAML前置元数据
+            f.write('---\n')
+            f.write(f'url: {url}\n')
+            f.write(f'title: {title}\n')
+            f.write(f'date: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n')
+            f.write(f'fingerprint: {fingerprint}\n')
+            f.write('---\n\n')
+            
+            # 添加标题和正文
+            f.write(f'# {title}\n\n')
+            f.write(f'URL: [{url}]({url})\n\n')
+            f.write(f'{content}\n')
         
         logger.debug(f'页面保存到: {filepath}')
         return filepath
@@ -200,25 +201,42 @@ class WebsiteCrawler:
         all_pages = {}
         unique_fingerprints = set()  # 用于防止重复内容
         
-        for page_file in self.pages_dir.glob('*.json'):
+        for page_file in self.pages_dir.glob('*.md'):  # 修改为读取.md文件
             logger.debug(f'读取页面文件: {page_file}')
             try:
                 with open(page_file, 'r', encoding='utf-8') as f:
-                    page_data = json.load(f)
-                    url = page_data.get('url')
-                    title = page_data.get('title')
-                    content = page_data.get('content')
-                    fingerprint = page_data.get('fingerprint')
+                    content = f.read()
                     
-                    # 检查是否已有相同内容
-                    if fingerprint and fingerprint not in unique_fingerprints:
-                        unique_fingerprints.add(fingerprint)
-                        if url and title and content:
-                            # 使用规范化URL作为键，避免相同内容的不同URL版本
-                            normalized_url = page_data.get('normalized_url', url)
-                            all_pages[normalized_url] = (title, content)
+                    # 解析YAML前置元数据
+                    meta_parts = content.split('---', 2)
+                    if len(meta_parts) >= 3:
+                        meta_text = meta_parts[1].strip()
+                        main_content = meta_parts[2].strip()
+                        
+                        # 提取元数据
+                        url = None
+                        title = None
+                        fingerprint = None
+                        
+                        for line in meta_text.split('\n'):
+                            if line.startswith('url:'):
+                                url = line.replace('url:', '').strip()
+                            elif line.startswith('title:'):
+                                title = line.replace('title:', '').strip()
+                            elif line.startswith('fingerprint:'):
+                                fingerprint = line.replace('fingerprint:', '').strip()
+                        
+                        # 检查是否已有相同内容
+                        if fingerprint and fingerprint not in unique_fingerprints:
+                            unique_fingerprints.add(fingerprint)
+                            if url and title:
+                                # 使用规范化URL作为键，避免相同内容的不同URL版本
+                                normalized_url = self.normalize_url(url)
+                                all_pages[normalized_url] = (title, main_content)
+                        else:
+                            logger.debug(f'跳过重复内容: {url}')
                     else:
-                        logger.debug(f'跳过重复内容: {url}')
+                        logger.warning(f'文件格式不正确，无法解析元数据: {page_file}')
             except Exception as e:
                 logger.error(f'读取页面文件 {page_file} 失败: {str(e)}')
         
@@ -248,35 +266,16 @@ class WebsiteCrawler:
         md_content = result.markdown_v2.fit_markdown or result.markdown_v2.raw_markdown
         
         # 创建页面的完整Markdown内容
-        page_content = f'### 页面内容\n\n{md_content}'
+        page_content = f'{md_content}'
         
         # 添加图片部分
         if result.media and 'images' in result.media and result.media['images']:
-            page_content += '\n\n### 页面图片\n\n'
+            page_content += '\n\n## 页面图片\n\n'
             for img in result.media['images']:
                 src = img.get('src', '')
                 alt = img.get('alt', '图片') or '图片'
                 if src:
                     page_content += f'![{alt}]({src})\n\n'
-        
-        # 添加参考链接
-        if result.links:
-            page_content += '\n\n## 参考链接\n\n'
-            
-            # 处理内部链接
-            links_processed = set()
-            counter = 1
-            
-            for link_type in ['internal', 'external']:
-                if link_type in result.links:
-                    for link in result.links[link_type]:
-                        href = link.get('href', '')
-                        text = link.get('text', href) or href
-                        
-                        if href and href not in links_processed:
-                            links_processed.add(href)
-                            page_content += f'\n\n⟨{counter}⟩ {href}: {text}'
-                            counter += 1
         
         # 直接保存到文件中，自动处理重复内容检测
         saved_path = await self.save_page(result.url, page_title, page_content)
@@ -444,12 +443,15 @@ class WebsiteCrawler:
             while current_level_urls and current_depth <= self.max_depth:
                 logger.info(f'开始爬取深度 {current_depth} 的页面，URL数量: {len(current_level_urls)}')
                 
-                # 创建进度条
+                # 创建进度条，设置position=0确保显示在底部，leave=True保持进度条显示
                 self.progress_bar = tqdm(
                     desc=f'深度 {current_depth} 爬取进度',
                     total=len(current_level_urls),
                     unit='页面',
-                    colour='green'
+                    colour='green',
+                    position=0,
+                    leave=True,
+                    dynamic_ncols=True  # 动态调整列宽以适应终端大小变化
                 )
                 
                 # 使用crawl4ai的arun_many并启用streaming模式，实时处理结果
