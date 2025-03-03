@@ -8,8 +8,6 @@
 
 import sys
 import platform
-import shutil
-import os
 from pathlib import Path
 from loguru import logger
 from cli import parse_args

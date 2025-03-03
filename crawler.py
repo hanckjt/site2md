@@ -7,7 +7,6 @@
 '''
 
 import re
-import time
 from pathlib import Path
 from urllib.parse import urlparse, urljoin
 from collections import deque
@@ -16,6 +15,7 @@ from loguru import logger
 from botasaurus.browser import browser, Driver
 from utils import extract_domain, sanitize_filename
 from markdown_converter import convert_to_markdown, merge_markdown_files
+import shutil
 
 
 class WebsiteCrawler:
@@ -75,11 +75,18 @@ class WebsiteCrawler:
         logger.info(f'最大深度: {self.max_depth}')
         logger.info(f'并行数量: {self.parallel}')
 
+        # 清理缓存目录
+        cache_dir = Path('./cache')
+        if cache_dir.exists():
+            logger.info('清理缓存目录...')
+            shutil.rmtree(cache_dir)
+            logger.info('缓存目录已清理')
+
         # 确保输出目录存在
         self.pages_dir.mkdir(parents=True, exist_ok=True)
 
         # 创建进度条
-        self.pbar = tqdm(desc='爬取进度', unit='页', position=0, leave=True)
+        self.pbar = tqdm(desc='爬取进度', unit='页', position=-1, leave=True, dynamic_ncols=True)
 
         # 爬取网站
         self._crawl_with_browser()
@@ -99,11 +106,12 @@ class WebsiteCrawler:
         '''
         使用浏览器模式爬取网站
         '''
+
         @browser(parallel=self.parallel, cache=True, close_on_crash=True, block_images_and_css=True, max_retry=3)
         def scrape_single_page(driver: Driver, data):
             '''
             爬取单个页面
-            
+
             参数:
                 driver: 浏览器驱动
                 data: 包含 url 和 depth 的元组
@@ -111,7 +119,7 @@ class WebsiteCrawler:
             url, depth = data
             result = self._crawl_single_url(driver, url, depth)
             return {"url": url, "result": result}
-        
+
         # 处理队列中的URL，单个爬取
         while self.url_queue:
             url, depth = self.url_queue.popleft()
@@ -123,12 +131,12 @@ class WebsiteCrawler:
     def _crawl_single_url(self, driver, url, depth):
         '''
         爬取单个URL
-        
+
         参数:
             driver: 浏览器驱动
             url: 要爬取的URL
             depth: 当前深度
-            
+
         返回:
             bool: 爬取是否成功
         '''
@@ -222,10 +230,16 @@ class WebsiteCrawler:
                 parsed_url = urlparse(absolute_url)
                 if not parsed_url.scheme or not parsed_url.netloc:
                     continue
+                # 如果设置了跳过带参数的URL，并且URL包含查询参数，则跳过
+                if '?' in absolute_url:
+                    logger.debug(f'跳过带参数的URL: {absolute_url}')
+                    continue
 
                 # 只保留指定域名的URL
-                if self.domain_limit in extract_domain(absolute_url):
+                if self.domain_limit in absolute_url:
                     processed_urls.append(absolute_url)
+                else:
+                    logger.debug(f'跳过非目标域名的URL: {absolute_url}')
 
             # 去重
             unique_urls = list(set(processed_urls))
@@ -307,4 +321,3 @@ class WebsiteCrawler:
             logger.info(f'合并完成，文件保存至: {output_file}')
         except Exception as e:
             logger.error(f'合并Markdown文件时发生错误: {str(e)}')
-

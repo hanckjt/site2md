@@ -10,6 +10,7 @@ import argparse
 import sys
 from pathlib import Path
 from utils import check_url_accessibility
+import shutil
 
 
 def parse_args():
@@ -72,5 +73,11 @@ def parse_args():
         if answer.lower() != 'y':
             print("爬取已取消。")
             sys.exit(0)
-        
+        else:
+            # 清空已存在的目录
+            print(f"正在清空目录：{args.output}")
+            shutil.rmtree(output_path)
+            output_path.mkdir(exist_ok=True)
+            print(f"目录已重新创建：{args.output}")
+
     return args

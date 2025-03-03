@@ -6,14 +6,12 @@ Markdown转换模块
 负责HTML到Markdown的转换和Markdown文件合并
 '''
 
-import io
-import re
+
 import tempfile
 from pathlib import Path
 from loguru import logger
 from markitdown import MarkItDown
 from bs4 import BeautifulSoup
-import html2text
 
 
 def convert_to_markdown(url, html):
@@ -39,46 +37,32 @@ def convert_to_markdown(url, html):
             logger.warning(f"提取标题失败: {str(e)}")
             title = url
 
-        # 直接使用html2text进行转换
+        # 直接使用MarkItDown进行转换
         try:
-            logger.debug("使用html2text进行转换")
-            converter = html2text.HTML2Text()
-            converter.ignore_links = False
-            converter.ignore_images = False
-            converter.ignore_tables = False
-            converter.body_width = 0  # 不限制宽度
-            markdown_content = converter.handle(html)
+            logger.debug("使用MarkItDown进行转换")
+            md = MarkItDown()
 
-            logger.debug(f"html2text转换成功，生成了 {len(markdown_content)} 字节的Markdown内容")
+            # 创建一个临时文件
+            with tempfile.NamedTemporaryFile(suffix='.html', mode='w+', encoding='utf-8', delete=False) as temp:
+                temp.write(html)
+                temp_name = temp.name
+
+            # 转换HTML到Markdown
+            result = md.convert(temp_name)
+
+            # 删除临时文件
+            Path(temp_name).unlink()
+
+            if result and hasattr(result, 'text_content') and result.text_content:
+                markdown_content = result.text_content
+                logger.debug(f"MarkItDown转换成功，生成了 {len(markdown_content)} 字节的Markdown内容")
+            else:
+                raise ValueError('MarkItDown返回了空结果')
         except Exception as e:
-            logger.error(f"html2text转换失败: {str(e)}")
-
-            # 如果html2text失败，尝试MarkItDown
-            try:
-                logger.debug("尝试使用MarkItDown进行转换")
-                md = MarkItDown()
-
-                # 创建一个临时文件
-                with tempfile.NamedTemporaryFile(suffix='.html', mode='w+', encoding='utf-8', delete=False) as temp:
-                    temp.write(html)
-                    temp_name = temp.name
-
-                # 转换HTML到Markdown
-                result = md.convert(temp_name)
-
-                # 删除临时文件
-                Path(temp_name).unlink()
-
-                if result and hasattr(result, 'text_content') and result.text_content:
-                    markdown_content = result.text_content
-                    logger.debug(f"MarkItDown转换成功，生成了 {len(markdown_content)} 字节的Markdown内容")
-                else:
-                    raise ValueError('MarkItDown返回了空结果')
-            except Exception as e:
-                logger.error(f"MarkItDown也转换失败: {str(e)}")
-                # 如果两种方法都失败，返回基本内容
-                markdown_content = f"# {title}\n\n**Source URL:** {url}\n\n**Error:** 无法转换内容\n\n"
-                logger.warning("使用基本内容作为转换结果")
+            logger.error(f"MarkItDown转换失败: {str(e)}")
+            # 如果转换失败，返回基本内容
+            markdown_content = f"# {title}\n\n**Source URL:** {url}\n\n**Error:** 无法转换内容\n\n"
+            logger.warning("使用基本内容作为转换结果")
 
         # 添加页面标题和URL作为元数据
         metadata = f'# {title}\n\n**Source URL:** {url}\n\n---\n\n'
@@ -104,7 +88,7 @@ def merge_markdown_files(input_dir, output_file, root_url):
     '''
     input_path = Path(input_dir)
     output_path = Path(output_file)
-    
+
     try:
         # 列出所有Markdown文件
         files = list(input_path.glob('*.md'))
